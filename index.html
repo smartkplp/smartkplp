@@ -1757,6 +1757,12 @@
     window.resetLogoUrl = resetLogoUrl;
     window.updateFrontText = updateFrontText;
     window.resetFrontText = resetFrontText;
+    window.openUserModal = openUserModal;
+    window.closeUserModal = closeUserModal;
+    window.closeConfirm = closeConfirm;
+    window.closePlacementModal = closePlacementModal;
+    window.closeBebasModal = closeBebasModal;
+    window.closeMutasiModal = closeMutasiModal;
 
     // init
     window.onload = function() {
@@ -1767,8 +1773,6 @@
       loadNotifications();
       
       // Default initial states
-      // loadLogo() dan loadFrontText() akan dipanggil otomatis setelah data snapshot Firestore wbp_settings di-load
-      
       document.getElementById('login-username').value = '';
       document.getElementById('login-password').value = '';
 
