@@ -686,6 +686,15 @@
           renderNotifications();
         }
       }, (err) => { console.warn("Firebase wbp_notifications offline/warning:", err); });
+
+      // TAMBAHAN: Listener realtime untuk settings logo dan judul agar tersebar ke semua browser secara instan
+      onSnapshot(doc(db, "lapas_argamakmur", "wbp_settings"), (docSnap) => {
+        if (docSnap.exists() && docSnap.data().data) {
+          settingsData = JSON.parse(docSnap.data().data);
+          loadLogo();
+          loadFrontText();
+        }
+      }, (err) => { console.warn("Firebase wbp_settings offline/warning:", err); });
     }
 
     let currentRole = "";
@@ -695,6 +704,13 @@
     let usersData = [];
     let sessionsData = [];
     let notificationsData = [];
+    
+    // TAMBAHAN: Menampung data logo dan text agar tidak bergantung penuh pada localstorage
+    let settingsData = {
+      logo: null,
+      title: null,
+      subtitle: null
+    };
     
     let deleteTarget = null;
     let mutasiTarget = null;
@@ -714,18 +730,24 @@
 
     const roleLabels = { register: "Register", kplp: "KPLP", regu: "Regu Jaga", admin: "Admin" };
 
-    // LOGO & FRONT TEXT LOGIC
+    // LOGO & FRONT TEXT LOGIC (PERBAIKAN AGAR TERSIMPAN DI FIREBASE)
+    
+    function saveSettings() {
+        saveFirebaseDoc('wbp_settings', settingsData);
+    }
+
     function loadLogo() {
       const defaultLogo = "https://images.unsplash.com/photo-1589829085413-56de8ae18c73?auto=format&fit=crop&q=80&w=200&h=200";
-      const savedLogo = localStorage.getItem('wbp_logo') || defaultLogo;
+      // Ambil dari settingsData (bersumber dari firebase), bukan localstorage
+      const savedLogo = settingsData.logo || defaultLogo;
       document.getElementById('front-logo-img').src = savedLogo;
     }
 
     function loadFrontText() {
       const defaultTitle = "Sistem Data WBP";
       const defaultSubtitle = "Lapas Kelas IIB Arga Makmur";
-      const savedTitle = localStorage.getItem('wbp_front_title') || defaultTitle;
-      const savedSubtitle = localStorage.getItem('wbp_front_subtitle') || defaultSubtitle;
+      const savedTitle = settingsData.title || defaultTitle;
+      const savedSubtitle = settingsData.subtitle || defaultSubtitle;
       document.getElementById('role-page-title').textContent = savedTitle;
       document.getElementById('role-page-subtitle').textContent = savedSubtitle;
       if (document.getElementById('front-new-title')) {
@@ -741,17 +763,19 @@
       if (file.size > 2097152) return showToast("Ukuran gambar tidak boleh melebihi 2 MB", "error");
       const reader = new FileReader();
       reader.onload = function(e) {
-        localStorage.setItem('wbp_logo', e.target.result);
-        loadLogo();
-        showToast("Logo berhasil diperbarui", "success");
+        // Ganti localstorage ke sinkronisasi Firebase
+        settingsData.logo = e.target.result;
+        saveSettings();
+        showToast("Logo berhasil diperbarui dan tersimpan di Firebase", "success");
         fileInput.value = '';
       };
       reader.readAsDataURL(file);
     }
 
     function resetLogoUrl() {
-      localStorage.removeItem('wbp_logo');
-      loadLogo();
+      // Hapus dari firebase
+      settingsData.logo = null;
+      saveSettings();
       showToast("Logo dikembalikan ke default", "success");
     }
 
@@ -760,16 +784,17 @@
       const title = document.getElementById('front-new-title').value.trim();
       const subtitle = document.getElementById('front-new-subtitle').value.trim();
       if (!title || !subtitle) return showToast("Judul dan Subjudul tidak boleh kosong!", "error");
-      localStorage.setItem('wbp_front_title', title);
-      localStorage.setItem('wbp_front_subtitle', subtitle);
-      loadFrontText();
-      showToast("Tulisan halaman depan berhasil diubah!", "success");
+      
+      settingsData.title = title;
+      settingsData.subtitle = subtitle;
+      saveSettings();
+      showToast("Tulisan halaman depan berhasil diubah ke Firebase!", "success");
     }
 
     function resetFrontText() {
-      localStorage.removeItem('wbp_front_title');
-      localStorage.removeItem('wbp_front_subtitle');
-      loadFrontText();
+      settingsData.title = null;
+      settingsData.subtitle = null;
+      saveSettings();
       showToast("Tulisan halaman depan dikembalikan ke default", "success");
     }
 
@@ -1185,462 +1210,570 @@
             blokSection.classList.remove('hidden');
             let bloks = { 'Blok A': 0, 'Blok B': 0, 'Blok C': 0, 'Blok D': 0, 'Strap Sel': 0 };
             active.forEach(d => { if(d.blok && bloks[d.blok] !== undefined) bloks[d.blok]++; });
-
-            const blokColors = { 'Blok A': '#ef4444', 'Blok B': '#3b82f6', 'Blok C': '#10b981', 'Blok D': '#a855f7', 'Strap Sel': '#64748b' };
-            drawPieChart('pie-blok', bloks, blokColors);
-
-            const legendDiv = document.getElementById('blok-legend');
-            legendDiv.innerHTML = '';
+            
+            const bColors = { 'Blok A': '#1e293b', 'Blok B': '#334155', 'Blok C': '#475569', 'Blok D': '#64748b', 'Strap Sel': '#f59e0b' };
+            drawPieChart('pie-blok', bloks, bColors);
+            
+            const bLegend = document.getElementById('blok-legend');
+            bLegend.innerHTML = '';
             for(let k in bloks) {
-                legendDiv.innerHTML += `<div class="flex items-center gap-2">
-                    <span class="w-3 h-3 rounded-full" style="background-color:${blokColors[k]}"></span>
-                    <span><strong>${bloks[k]}</strong> ${k}</span>
-                </div>`;
+                bLegend.innerHTML += `<div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full" style="background:${bColors[k]}"></span><span><strong>${bloks[k]}</strong> ${k}</span></div>`;
             }
         }
     }
 
-    // MAIN TABLE RENDER WITH SEARCH & FILTERS
     function renderTable() {
-       const tb = document.getElementById('data-tbody'); 
-       if(!tb) return;
-       tb.innerHTML = '';
-       
-       autoCleanHistory();
-       const allActive = getActiveData();
-       
-       document.getElementById('stat-total-num').textContent = allActive.length;
-       document.getElementById('stat-napi-num').textContent = allActive.filter(x => x.statusType === 'Narapidana').length;
-       document.getElementById('stat-tahanan-num').textContent = allActive.filter(x => x.statusType === 'Tahanan').length;
+      const active = getActiveData();
+      const s = document.getElementById('search-input').value.toLowerCase();
+      const fc = document.getElementById('filter-case').value;
+      const fs = document.getElementById('filter-status').value;
+      const fb = document.getElementById('filter-block').value;
 
-       let tableData = allActive;
-       if (currentRole === 'kplp' || currentRole === 'regu') {
-           tableData = allActive.filter(d => d.blok !== '');
-       }
+      document.getElementById('stat-total-num').innerText = active.length;
+      document.getElementById('stat-napi-num').innerText = active.filter(d => d.statusType === 'Narapidana').length;
+      document.getElementById('stat-tahanan-num').innerText = active.filter(d => d.statusType === 'Tahanan').length;
+      document.getElementById('record-count').innerText = active.length + " WBP";
 
-       // Pencarian dan Filter
-       const sTerm = (document.getElementById('search-input')?.value || '').toLowerCase();
-       const fCase = document.getElementById('filter-case')?.value || '';
-       const fStatus = document.getElementById('filter-status')?.value || '';
-       const fBlock = document.getElementById('filter-block')?.value || '';
+      let filtered = active.filter(d => {
+       const mSearch = d.name.toLowerCase().includes(s);
+       const mCase = !fc || d.caseType === fc;
+       const mStatus = !fs || d.statusType === fs;
+       const mBlock = !fb || d.blok === fb;
+       return mSearch && mCase && mStatus && mBlock;
+      });
 
-       tableData = tableData.filter(d => {
-           const matchName = d.name.toLowerCase().includes(sTerm);
-           const matchCase = fCase ? d.caseType === fCase : true;
-           const matchStatus = fStatus ? d.statusType === fStatus : true;
-           const matchBlock = fBlock ? d.blok === fBlock : true;
-           return matchName && matchCase && matchStatus && matchBlock;
+      const tbody = document.getElementById('data-tbody');
+      tbody.innerHTML = '';
+      if (filtered.length === 0) {
+       document.getElementById('empty-msg').classList.remove('hidden');
+      } else {
+       document.getElementById('empty-msg').classList.add('hidden');
+       filtered.forEach((d, idx) => {
+        const placeStatus = d.blok ? `<span class="bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-bold text-[11px]">${esc(d.blok)}</span>` : '<span class="text-slate-400 italic text-xs">Belum ditempatkan</span>';
+        const roomStatus = d.room ? esc(d.room) : '-';
+
+        let btnPlace = '', btnDel = '', btnBebas = '', btnMutasi = '';
+        if (permissions[currentRole].editPlace) {
+         btnPlace = `<button type="button" onclick="openPlacement('${d.id}')" class="px-2.5 py-1.5 bg-slate-100 hover:bg-amber-500 hover:text-white rounded-lg transition font-medium text-slate-700" title="Tempatkan / Pindah Kamar"><i data-lucide="map-pin" style="width:14px;height:14px"></i></button>`;
+        }
+        if (permissions[currentRole].delete) {
+         btnDel = `<button type="button" onclick="openDelete('${d.id}')" class="px-2.5 py-1.5 bg-slate-100 hover:bg-red-600 hover:text-white rounded-lg transition font-medium text-slate-700" title="Hapus"><i data-lucide="trash-2" style="width:14px;height:14px"></i></button>`;
+        }
+        if (permissions[currentRole].bebas) {
+         btnBebas = `<button type="button" onclick="openBebas('${d.id}')" class="px-2.5 py-1.5 bg-slate-100 hover:bg-emerald-600 hover:text-white rounded-lg transition font-medium text-slate-700" title="Pembebasan"><i data-lucide="user-minus" style="width:14px;height:14px"></i></button>`;
+        }
+        if (permissions[currentRole].mutasi) {
+          btnMutasi = `<button type="button" onclick="openMutasi('${d.id}')" class="px-2.5 py-1.5 bg-slate-100 hover:bg-blue-600 hover:text-white rounded-lg transition font-medium text-slate-700" title="Mutasi"><i data-lucide="refresh-cw" style="width:14px;height:14px"></i></button>`;
+        }
+
+        const tr = document.createElement('tr');
+        tr.className = "hover:bg-slate-50 transition border-b border-slate-100";
+        tr.innerHTML = `
+         <td class="px-4 py-3 whitespace-nowrap text-slate-500">${idx + 1}</td>
+         <td class="px-4 py-3 font-semibold text-slate-900">${esc(d.name)}</td>
+         <td class="px-4 py-3"><span class="bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg text-[11px] font-bold">${esc(d.statusType)}</span></td>
+         <td class="px-4 py-3"><span class="border border-slate-200 text-slate-600 px-2.5 py-1 rounded-lg text-[11px] font-bold">${esc(d.caseType)}</span></td>
+         <td class="px-4 py-3 col-block">${placeStatus}</td>
+         <td class="px-4 py-3 col-room font-medium text-slate-700">${roomStatus}</td>
+         <td class="px-4 py-3 col-aksi"><div class="flex items-center gap-1.5">${btnPlace}${btnBebas}${btnMutasi}${btnDel}</div></td>
+        `;
+        tbody.appendChild(tr);
        });
-
-       if(tableData.length === 0) {
-           document.getElementById('empty-msg').classList.remove('hidden');
-       } else {
-           document.getElementById('empty-msg').classList.add('hidden');
-           tableData.forEach((d, idx) => {
-               let actions = [];
-               if (permissions[currentRole].bebas) actions.push(`<button onclick="promptBebas('${d.id}')" class="text-green-600 hover:text-green-800 font-semibold text-xs mr-2 transition">Bebas</button>`);
-               if (permissions[currentRole].mutasi) actions.push(`<button onclick="promptMutasi('${d.id}')" class="text-blue-600 hover:text-blue-800 font-semibold text-xs mr-2 transition">Mutasi</button>`);
-               if (permissions[currentRole].editPlace) actions.push(`<button onclick="openPlacementModal('${d.id}')" class="text-amber-600 hover:text-amber-800 font-semibold text-xs mr-2 transition">${d.blok ? 'Pindah' : 'Tempatkan'}</button>`);
-               if (permissions[currentRole].delete) actions.push(`<button onclick="promptDelete('${d.id}')" class="text-red-500 hover:text-red-700 font-semibold text-xs transition">Hapus</button>`);
-
-               const tr = document.createElement('tr');
-               tr.innerHTML = `
-                   <td class="px-4 py-3">${idx + 1}</td>
-                   <td class="px-4 py-3 font-semibold">${esc(d.name)}</td>
-                   <td class="px-4 py-3">${esc(d.statusType)}</td>
-                   <td class="px-4 py-3">${esc(d.caseType)}</td>
-                   <td class="px-4 py-3 col-block">${esc(d.blok || 'Belum')}</td>
-                   <td class="px-4 py-3 col-room">${esc(d.room || 'Belum')}</td>
-                   <td class="px-4 py-3 col-aksi">${actions.join('')}</td>
-               `;
-               tb.appendChild(tr);
-           });
-       }
        lucide.createIcons();
+      }
     }
 
-    // UNPLACED WBP VIEW
-    function renderUnplaced() {
-        const tb = document.getElementById('unplaced-tbody'); 
-        tb.innerHTML = '';
-        const unplaced = getActiveData().filter(d => d.blok === '');
+    function toggleForm() {
+     const section = document.getElementById('add-form-section');
+     section.classList.toggle('hidden');
+    }
+    document.getElementById('search-input').addEventListener('input', renderTable);
+    document.getElementById('filter-case').addEventListener('change', renderTable);
+    document.getElementById('filter-status').addEventListener('change', renderTable);
+    document.getElementById('filter-block').addEventListener('change', renderTable);
+    
+    function toggleNotifications() {
+      const panel = document.getElementById('notification-panel');
+      panel.classList.toggle('hidden');
+      if (!panel.classList.contains('hidden')) {
+        let changed = false;
+        notificationsData.forEach(n => {
+          if (!n.isRead) { n.isRead = true; changed = true; }
+        });
+        if (changed) saveNotifications();
+        renderNotifications();
+      }
+    }
+    function closeNotifications() { document.getElementById('notification-panel').classList.add('hidden'); }
+    function setNotificationFilter(f) {
+      notificationFilter = f;
+      ['all', 'new', 'mutasi'].forEach(id => {
+        const btn = document.getElementById('notif-filter-' + id);
+        if(id === f) { btn.classList.add("border-amber-500", "text-amber-600"); btn.classList.remove("border-transparent", "text-slate-500"); }
+        else { btn.classList.remove("border-amber-500", "text-amber-600"); btn.classList.add("border-transparent", "text-slate-500"); }
+      });
+      renderNotifications();
+    }
 
+    // Modal Akun
+    function openUserModal(id = null) {
+      const modal = document.getElementById('user-modal');
+      const form = document.getElementById('user-form');
+      form.reset();
+      if(id) {
+        const u = usersData.find(x => x.id === id);
+        if(u) {
+          document.getElementById('user-id').value = u.id;
+          document.getElementById('user-username').value = u.username;
+          document.getElementById('user-password').value = u.password;
+          document.getElementById('user-role').value = u.role;
+          document.getElementById('user-modal-title').textContent = "Edit Akun";
+        }
+      } else {
+        document.getElementById('user-id').value = '';
+        document.getElementById('user-modal-title').textContent = "Buat Akun";
+      }
+      modal.classList.remove('hidden');
+    }
+    function closeUserModal() { document.getElementById('user-modal').classList.add('hidden'); }
+    
+    // Simpan Akun (Menolak duplicate)
+    window.saveUser = function(e) {
+      e.preventDefault();
+      const id = document.getElementById('user-id').value;
+      const un = document.getElementById('user-username').value.trim();
+      const pw = document.getElementById('user-password').value;
+      const rl = document.getElementById('user-role').value;
+      
+      const duplicate = usersData.find(x => x.username.toLowerCase() === un.toLowerCase() && x.id !== id);
+      if(duplicate) return showToast("Username sudah digunakan!", "error");
+
+      if(id) {
+        const i = usersData.findIndex(x => x.id === id);
+        if(i > -1) { usersData[i].username = un; usersData[i].password = pw; usersData[i].role = rl; }
+      } else {
+        usersData.push({ id: 'u_'+Date.now(), username: un, password: pw, role: rl });
+      }
+      saveUsersToStorage();
+      closeUserModal();
+      renderUsersTable();
+      showToast("Akun berhasil disimpan");
+    }
+
+    function renderUsersTable() {
+      const tbody = document.getElementById('users-tbody');
+      tbody.innerHTML = '';
+      usersData.forEach(u => {
+        const btnEdit = `<button onclick="openUserModal('${u.id}')" class="px-2 py-1 bg-slate-100 text-slate-700 rounded hover:bg-amber-500 hover:text-white transition">Edit</button>`;
+        let btnDel = `<button onclick="deleteUser('${u.id}')" class="px-2 py-1 bg-slate-100 text-slate-700 rounded hover:bg-red-600 hover:text-white transition">Hapus</button>`;
+        if(u.id === 'u1') btnDel = ''; // prevent delete root admin
+        
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td class="px-4 py-2 font-medium">${esc(u.username)}</td>
+          <td class="px-4 py-2"><span class="bg-amber-100 text-amber-800 px-2 py-0.5 rounded text-xs font-bold">${roleLabels[u.role]||u.role}</span></td>
+          <td class="px-4 py-2 flex gap-2">${btnEdit}${btnDel}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    window.deleteUser = function(id) {
+      if(confirm("Hapus akun ini?")) {
+        usersData = usersData.filter(x => x.id !== id);
+        saveUsersToStorage();
+        renderUsersTable();
+        showToast("Akun dihapus");
+      }
+    }
+
+    function renderSessionsTable() {
+      const tbody = document.getElementById('sessions-tbody');
+      tbody.innerHTML = '';
+      sessionsData.forEach(s => {
+        const dt = new Date(s.loginAt);
+        const st = s.status === 'Online' ? `<span class="text-emerald-600 font-bold"><span class="inline-block w-2 h-2 rounded-full bg-emerald-500 mr-1"></span>Online</span>` : `<span class="text-slate-500">Offline</span>`;
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td class="px-4 py-2 font-medium">${esc(s.username)}</td>
+          <td class="px-4 py-2 text-xs">${roleLabels[s.role]||s.role}</td>
+          <td class="px-4 py-2 text-xs">${dt.toLocaleString('id-ID')}</td>
+          <td class="px-4 py-2 text-xs">${st}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    // Modal Konfirmasi Global
+    function openConfirm(title, text, confirmCallback) {
+        document.getElementById('confirm-title').textContent = title;
+        document.getElementById('confirm-text').textContent = text;
+        const btnOk = document.getElementById('confirm-ok');
+        btnOk.onclick = () => {
+            confirmCallback();
+            closeConfirm();
+        };
+        document.getElementById('confirm-modal').classList.remove('hidden');
+    }
+    function closeConfirm() { document.getElementById('confirm-modal').classList.add('hidden'); }
+
+    // Hapus WBP
+    window.openDelete = function(id) {
+        openConfirm("Hapus WBP", "Semua data WBP ini akan terhapus permanen. Lanjutkan?", () => {
+            allData = allData.filter(d => d.id !== id);
+            saveData();
+            renderAll();
+            showToast("Data WBP dihapus");
+        });
+    }
+
+    // Bebas WBP
+    window.openBebas = function(id) {
+        bebasTarget = id;
+        document.getElementById('bebas-wbp-id').value = id;
+        document.getElementById('bebas-modal').classList.remove('hidden');
+    }
+    function closeBebasModal() { document.getElementById('bebas-modal').classList.add('hidden'); bebasTarget = null; }
+    
+    window.saveBebas = function(e) {
+        e.preventDefault();
+        const jenis = document.getElementById('bebas-jenis').value;
+        const dt = allData.find(d => d.id === bebasTarget);
+        if(dt) {
+            dt.is_free = true;
+            dt.bebas_type = jenis;
+            dt.bebas_date = new Date().toISOString();
+            dt.blok = '';
+            dt.room = '';
+            saveData();
+            addNotification('Pembebasan WBP', `${dt.name} dibebaskan (${jenis}).`, 'mutasi');
+            renderAll();
+            if(!document.getElementById("bebas-section").classList.contains("hidden")) renderBebas();
+            showToast("WBP berhasil dibebaskan");
+            closeBebasModal();
+        }
+    }
+
+    // Mutasi WBP
+    window.openMutasi = function(id) {
+        mutasiTarget = id;
+        document.getElementById('mutasi-wbp-id').value = id;
+        document.getElementById('mutasi-modal').classList.remove('hidden');
+    }
+    function closeMutasiModal() { document.getElementById('mutasi-modal').classList.add('hidden'); mutasiTarget = null; }
+    
+    window.saveMutasi = function(e) {
+        e.preventDefault();
+        const tujuan = document.getElementById('mutasi-tujuan').value.trim();
+        const dt = allData.find(d => d.id === mutasiTarget);
+        if(dt) {
+            dt.is_mutasi = true;
+            dt.mutasi_tujuan = tujuan;
+            dt.mutasi_date = new Date().toISOString();
+            dt.blok = '';
+            dt.room = '';
+            saveData();
+            addNotification('Mutasi WBP', `${dt.name} dimutasi ke ${tujuan}.`, 'mutasi');
+            renderAll();
+            if(!document.getElementById("mutasi-section").classList.contains("hidden")) renderMutasi();
+            showToast("WBP berhasil dimutasi");
+            closeMutasiModal();
+        }
+    }
+
+    // Bersihkan Riwayat Otomatis Manual (Tombol Penghapus)
+    window.openCleanup = function() {
+        openConfirm("Bersihkan Riwayat", "Semua riwayat Bebas dan Mutasi akan dihapus sekarang. Lanjutkan?", () => {
+            allData = allData.filter(d => !d.is_free && !d.is_mutasi);
+            saveData();
+            renderAll();
+            if(!document.getElementById("bebas-section").classList.contains("hidden")) renderBebas();
+            if(!document.getElementById("mutasi-section").classList.contains("hidden")) renderMutasi();
+            showToast("Semua riwayat bebas & mutasi telah dibersihkan");
+        });
+    }
+
+    // Update Own Credentials (Admin)
+    window.updateMyCredentials = function(e) {
+        e.preventDefault();
+        const un = document.getElementById('my-new-username').value.trim();
+        const pw = document.getElementById('my-new-password').value;
+        if(activeUser && activeUser.role === 'admin') {
+            const id = activeUser.id;
+            const duplicate = usersData.find(x => x.username.toLowerCase() === un.toLowerCase() && x.id !== id);
+            if(duplicate) return showToast("Username sudah digunakan!", "error");
+            
+            const i = usersData.findIndex(x => x.id === id);
+            if(i > -1) { 
+                usersData[i].username = un; 
+                usersData[i].password = pw; 
+                activeUser.username = un;
+                activeUser.password = pw;
+                saveUsersToStorage();
+                showToast("Kredensial berhasil diperbarui", "success");
+            }
+        }
+    }
+
+    /* VIEW BLOK & PENEMPATAN */
+    const roomsConf = {
+      'Blok A': ['Kamar 1', 'Kamar 2', 'Kamar 3'],
+      'Blok B': ['Kamar 1', 'Kamar 2', 'Kamar 3', 'Kamar 4'],
+      'Blok C': ['Kamar 1', 'Kamar 2', 'Kamar 3', 'Kamar 4'],
+      'Blok D': ['Kamar 1', 'Kamar 2', 'Kamar 3', 'Kamar 4', 'Kamar 5', 'Kamar 6'],
+      'Strap Sel': ['Sel 1', 'Sel 2']
+    };
+
+    window.updateRoomOptions = function() {
+      const b = document.getElementById('place-blok').value;
+      const roomSel = document.getElementById('place-room');
+      roomSel.innerHTML = '<option value="">Pilih Kamar...</option>';
+      if (roomsConf[b]) {
+        roomsConf[b].forEach(r => {
+          roomSel.innerHTML += `<option value="${r}">${r}</option>`;
+        });
+      }
+    }
+
+    window.openPlacement = function(id) {
+      const d = allData.find(x => x.id === id);
+      if(!d) return;
+      document.getElementById('place-wbp-id').value = d.id;
+      document.getElementById('place-blok').value = d.blok || '';
+      updateRoomOptions();
+      document.getElementById('place-room').value = d.room || '';
+      document.getElementById('placement-modal').classList.remove('hidden');
+    }
+
+    window.closePlacementModal = function() {
+      document.getElementById('placement-modal').classList.add('hidden');
+    }
+
+    window.savePlacement = function(e) {
+      e.preventDefault();
+      const id = document.getElementById('place-wbp-id').value;
+      const b = document.getElementById('place-blok').value;
+      const r = document.getElementById('place-room').value;
+      const d = allData.find(x => x.id === id);
+      if(d) {
+        d.blok = b;
+        d.room = r;
+        saveData();
+        renderAll();
+        if(!document.getElementById("unplaced-section").classList.contains("hidden")) renderUnplaced();
+        closePlacementModal();
+        showToast("Penempatan berhasil disimpan");
+      }
+    }
+
+    function renderUnplaced() {
+        const unplaced = getActiveData().filter(d => !d.blok);
+        const tbody = document.getElementById('unplaced-tbody');
+        tbody.innerHTML = '';
         if(unplaced.length === 0) {
             document.getElementById('unplaced-empty').classList.remove('hidden');
         } else {
             document.getElementById('unplaced-empty').classList.add('hidden');
             unplaced.forEach((d, idx) => {
-                let actionBtn = '';
-                if (permissions[currentRole].editPlace) {
-                    actionBtn = `<button onclick="openPlacementModal('${d.id}')" class="px-3 py-1 bg-amber-500 text-slate-900 rounded-lg text-xs font-bold hover:bg-amber-400">Tempatkan</button>`;
+                let btnPlace = '';
+                if(permissions[currentRole].editPlace) {
+                    btnPlace = `<button onclick="openPlacement('${d.id}')" class="px-3 py-1.5 bg-amber-500 text-slate-900 font-bold rounded-lg text-xs hover:bg-amber-400 transition shadow">Tempatkan</button>`;
                 }
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
-                    <td class="px-4 py-3">${idx + 1}</td>
-                    <td class="px-4 py-3 font-semibold">${esc(d.name)}</td>
-                    <td class="px-4 py-3">${esc(d.statusType)}</td>
-                    <td class="px-4 py-3">${esc(d.caseType)}</td>
-                    <td class="px-4 py-3">${actionBtn}</td>
-                `;
-                tb.appendChild(tr);
-            });
-        }
-    }
-
-    // BLOK HUNIAN VIEW
-    function renderBlok() {
-        const vBlock = document.getElementById('blok-view');
-        const vRoom = document.getElementById('blok-room-view');
-        const vRes = document.getElementById('blok-resident-view');
-        vBlock.classList.add('hidden'); vRoom.classList.add('hidden'); vRes.classList.add('hidden');
-        const btnBack = document.getElementById('btn-back-blok');
-        const active = getActiveData();
-
-        if (blokNavigation.view === 'blocks') {
-            vBlock.classList.remove('hidden'); btnBack.classList.add('hidden'); vBlock.innerHTML = '';
-            const bCounts = { 'Blok A': 0, 'Blok B': 0, 'Blok C': 0, 'Blok D': 0, 'Strap Sel': 0 };
-            active.forEach(d => { if(d.blok && bCounts[d.blok] !== undefined) bCounts[d.blok]++; });
-
-            Object.keys(bCounts).forEach(b => {
-                vBlock.innerHTML += `<div onclick="goToBlock('${b}')" class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 hover:border-amber-500 cursor-pointer transition">
-                    <h3 class="font-bold text-lg text-slate-900">${b}</h3>
-                    <p class="text-sm text-slate-500 mt-1">${bCounts[b]} WBP terisi</p>
-                </div>`;
-            });
-        } else if (blokNavigation.view === 'rooms') {
-            vRoom.classList.remove('hidden'); btnBack.classList.remove('hidden');
-            const b = blokNavigation.currentBlock;
-            let roomCount = (b==='Blok A'||b==='Blok C') ? 14 : (b==='Blok B') ? 6 : (b==='Blok D') ? 4 : (b==='Strap Sel') ? 3 : 0;
-            let rcHtml = '';
-            for(let i=1; i<=roomCount; i++) {
-                const rName = 'Kamar ' + i;
-                const c = active.filter(d => d.blok === b && d.room === rName).length;
-                rcHtml += `<div onclick="goToRoom('${b}', '${rName}')" class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 hover:border-amber-500 cursor-pointer transition flex justify-between items-center">
-                    <h4 class="font-bold text-slate-900">${rName}</h4>
-                    <span class="bg-slate-100 px-2 py-1 rounded text-xs font-bold text-slate-700">${c} WBP</span>
-                </div>`;
-            }
-            document.getElementById('blok-room-content').innerHTML = rcHtml;
-        } else if (blokNavigation.view === 'residents') {
-            vRes.classList.remove('hidden'); btnBack.classList.remove('hidden');
-            const b = blokNavigation.currentBlock;
-            const r = blokNavigation.currentRoom;
-            const res = active.filter(d => d.blok === b && d.room === r);
-
-            let html = `<div class="bg-slate-900 text-amber-500 p-4 font-bold flex justify-between"><span>${b} - ${r}</span> <span>Total: ${res.length}</span></div>`;
-            if(res.length === 0) { html += `<p class="p-4 text-center text-slate-500 text-sm">Kamar kosong.</p>`; } 
-            else {
-                html += `<table class="w-full text-sm"><thead class="bg-slate-100 text-slate-800"><tr><th class="px-4 py-2 text-left">No</th><th class="px-4 py-2 text-left">Nama</th><th class="px-4 py-2 text-left">Status</th></tr></thead><tbody class="divide-y divide-slate-100">`;
-                res.forEach((d, idx) => { html += `<tr><td class="px-4 py-2">${idx+1}</td><td class="px-4 py-2 font-semibold">${esc(d.name)}</td><td class="px-4 py-2">${esc(d.statusType)}</td></tr>`; });
-                html += `</tbody></table>`;
-            }
-            document.getElementById('blok-resident-content').innerHTML = html;
-        }
-    }
-
-    function goToBlock(b) { blokNavigation.view = 'rooms'; blokNavigation.currentBlock = b; renderBlok(); }
-    function goToRoom(b, r) { blokNavigation.view = 'residents'; blokNavigation.currentRoom = r; renderBlok(); }
-    function backFromBlok() {
-        if (blokNavigation.view === 'residents') { blokNavigation.view = 'rooms'; blokNavigation.currentRoom = null; } 
-        else if (blokNavigation.view === 'rooms') { blokNavigation.view = 'blocks'; blokNavigation.currentBlock = null; }
-        renderBlok();
-    }
-
-    // PENEMPATAN / PINDAH KAMAR
-    function openPlacementModal(id) {
-        document.getElementById('place-wbp-id').value = id;
-        document.getElementById('place-blok').value = '';
-        document.getElementById('place-room').innerHTML = '<option value="">Pilih Kamar...</option>';
-        document.getElementById('placement-modal').classList.remove('hidden');
-    }
-    function closePlacementModal() { document.getElementById('placement-modal').classList.add('hidden'); }
-    
-    function updateRoomOptions() {
-        const b = document.getElementById('place-blok').value;
-        const r = document.getElementById('place-room');
-        r.innerHTML = '<option value="">Pilih Kamar...</option>';
-        let count = (b==='Blok A'||b==='Blok C') ? 14 : (b==='Blok B') ? 6 : (b==='Blok D') ? 4 : (b==='Strap Sel') ? 3 : 0;
-        for(let i=1; i<=count; i++) r.innerHTML += `<option value="Kamar ${i}">Kamar ${i}</option>`;
-    }
-
-    function savePlacement(e) {
-        e.preventDefault();
-        const id = document.getElementById('place-wbp-id').value;
-        const b = document.getElementById('place-blok').value;
-        const r = document.getElementById('place-room').value;
-        const idx = allData.findIndex(x => x.id === id);
-        if(idx > -1 && b && r) {
-            allData[idx].blok = b;
-            allData[idx].room = r;
-            saveData();
-            renderAll();
-            closePlacementModal();
-            showToast("WBP berhasil ditempatkan di " + b + " " + r, "success");
-        }
-    }
-
-    // PROSES BEBAS WBP (DENGAN OPSIONAL BEBAS MURNI, PB, CB, CMB & NOTIFIKASI)
-    function promptBebas(id) {
-        bebasTarget = id;
-        document.getElementById('bebas-wbp-id').value = id;
-        document.getElementById('bebas-jenis').value = 'Bebas Murni';
-        document.getElementById('bebas-modal').classList.remove('hidden');
-    }
-    function closeBebasModal() {
-        bebasTarget = null;
-        document.getElementById('bebas-modal').classList.add('hidden');
-    }
-    function saveBebas(e) {
-        e.preventDefault();
-        const id = document.getElementById('bebas-wbp-id').value;
-        const jenis = document.getElementById('bebas-jenis').value;
-        const idx = allData.findIndex(x => x.id === id);
-        if(idx > -1) {
-          allData[idx].is_free = true;
-          allData[idx].jenis_bebas = jenis;
-          allData[idx].bebas_date = new Date().toISOString();
-          saveData();
-
-          // Notifikasi Bebas
-          addNotification('WBP Bebas', `WBP ${allData[idx].name} telah bebas (${jenis}).`, 'bebas');
-
-          closeBebasModal();
-          renderAll();
-          showToast(`WBP ${allData[idx].name} berhasil dibebaskan (${jenis})`, 'success');
-        }
-    }
-
-    // PROSES MUTASI WBP (DENGAN NOTIFIKASI)
-    function promptMutasi(id) {
-        mutasiTarget = id;
-        document.getElementById('mutasi-tujuan').value = '';
-        document.getElementById('mutasi-modal').classList.remove('hidden');
-    }
-    function closeMutasiModal() {
-        mutasiTarget = null;
-        document.getElementById('mutasi-modal').classList.add('hidden');
-    }
-    function saveMutasi(e) {
-        e.preventDefault();
-        const tujuan = document.getElementById('mutasi-tujuan').value.trim();
-        if(!tujuan) return;
-        const idx = allData.findIndex(x => x.id === mutasiTarget);
-        if(idx > -1) {
-            allData[idx].is_mutasi = true;
-            allData[idx].upt_tujuan = tujuan;
-            allData[idx].mutasi_date = new Date().toISOString();
-            saveData();
-
-            // Notifikasi Mutasi
-            addNotification('WBP Mutasi', `WBP ${allData[idx].name} dimutasi ke ${tujuan}.`, 'mutasi');
-
-            renderAll();
-            closeMutasiModal();
-            showToast("WBP berhasil dimutasi ke " + tujuan);
-        }
-    }
-
-    // RIWAYAT BEBAS & MUTASI
-    function renderBebas() {
-        autoCleanHistory();
-        const tb = document.getElementById('bebas-tbody'); tb.innerHTML = '';
-        const bebasData = allData.filter(d => d.is_free);
-        if (bebasData.length === 0) { document.getElementById('bebas-empty').classList.remove('hidden'); } 
-        else {
-            document.getElementById('bebas-empty').classList.add('hidden');
-            bebasData.forEach((d, idx) => {
-                const dateStr = d.bebas_date ? new Date(d.bebas_date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
-                const jenisStr = d.jenis_bebas || 'Bebas Murni';
-                tb.innerHTML += `<tr>
                     <td class="px-4 py-3">${idx+1}</td>
-                    <td class="px-4 py-3 font-semibold">${esc(d.name)}</td>
-                    <td class="px-4 py-3"><span class="px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-full text-xs font-bold">${esc(jenisStr)}</span></td>
-                    <td class="px-4 py-3">${dateStr}</td>
-                    <td class="px-4 py-3 text-xs text-slate-500 font-medium">Terhapus dalam 2 Hari</td>
-                </tr>`;
+                    <td class="px-4 py-3 font-semibold text-slate-900">${esc(d.name)}</td>
+                    <td class="px-4 py-3 text-xs"><span class="bg-slate-100 px-2 py-1 rounded">${esc(d.statusType)}</span></td>
+                    <td class="px-4 py-3 text-xs">${esc(d.caseType)}</td>
+                    <td class="px-4 py-3">${btnPlace}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+    }
+
+    function renderBebas() {
+        const bebas = allData.filter(d => d.is_free).sort((a,b) => new Date(b.bebas_date) - new Date(a.bebas_date));
+        const tbody = document.getElementById('bebas-tbody');
+        tbody.innerHTML = '';
+        if(bebas.length === 0) {
+            document.getElementById('bebas-empty').classList.remove('hidden');
+        } else {
+            document.getElementById('bebas-empty').classList.add('hidden');
+            const now = Date.now();
+            const twoDaysMs = 2 * 24 * 60 * 60 * 1000;
+            bebas.forEach((d, idx) => {
+                const age = now - new Date(d.bebas_date).getTime();
+                let remaining = twoDaysMs - age;
+                if(remaining < 0) remaining = 0;
+                let sisaMs = Math.floor(remaining / 60000);
+                const sisaHr = Math.floor(sisaMs / 60);
+                sisaMs = sisaMs % 60;
+                let sisaTeks = sisaHr > 0 ? `${sisaHr}j ${sisaMs}m lagi` : `${sisaMs}m lagi`;
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td class="px-4 py-3">${idx+1}</td>
+                    <td class="px-4 py-3 font-semibold text-emerald-700">${esc(d.name)}</td>
+                    <td class="px-4 py-3 text-xs font-bold text-slate-700">${esc(d.bebas_type)}</td>
+                    <td class="px-4 py-3 text-xs text-slate-500">${new Date(d.bebas_date).toLocaleString('id-ID')}</td>
+                    <td class="px-4 py-3 text-[10px] text-amber-600 font-bold">${sisaTeks}</td>
+                `;
+                tbody.appendChild(tr);
             });
         }
     }
 
     function renderMutasi() {
-        autoCleanHistory();
-        const tb = document.getElementById('mutasi-tbody'); tb.innerHTML = '';
-        const mutasiData = allData.filter(d => d.is_mutasi);
-        document.getElementById('mutasi-count').textContent = mutasiData.length + ' Mutasi';
-        if (mutasiData.length === 0) { document.getElementById('mutasi-empty').classList.remove('hidden'); } 
-        else {
+        const mutasi = allData.filter(d => d.is_mutasi).sort((a,b) => new Date(b.mutasi_date) - new Date(a.mutasi_date));
+        document.getElementById('mutasi-count').textContent = `Total: ${mutasi.length}`;
+        const tbody = document.getElementById('mutasi-tbody');
+        tbody.innerHTML = '';
+        if(mutasi.length === 0) {
+            document.getElementById('mutasi-empty').classList.remove('hidden');
+        } else {
             document.getElementById('mutasi-empty').classList.add('hidden');
-            mutasiData.forEach((d, idx) => {
-                const dateStr = d.mutasi_date ? new Date(d.mutasi_date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
-                tb.innerHTML += `<tr>
+            mutasi.forEach((d, idx) => {
+                const tr = document.createElement('tr');
+                tr.className = "mutasi-row";
+                tr.innerHTML = `
                     <td class="px-4 py-3">${idx+1}</td>
-                    <td class="px-4 py-3 font-semibold">${esc(d.name)}</td>
-                    <td class="px-4 py-3">${esc(d.statusType)}</td>
-                    <td class="px-4 py-3">${esc(d.caseType)}</td>
-                    <td class="px-4 py-3 font-medium text-slate-700">${esc(d.upt_tujuan)}</td>
-                    <td class="px-4 py-3">${dateStr}</td>
-                </tr>`;
+                    <td class="px-4 py-3 font-semibold text-red-700">${esc(d.name)}</td>
+                    <td class="px-4 py-3 text-xs"><span class="bg-slate-100 px-2 py-1 rounded">${esc(d.statusType)}</span></td>
+                    <td class="px-4 py-3 text-xs">${esc(d.caseType)}</td>
+                    <td class="px-4 py-3 font-bold text-slate-800">${esc(d.mutasi_tujuan)}</td>
+                    <td class="px-4 py-3 text-xs text-slate-500">${new Date(d.mutasi_date).toLocaleString('id-ID')}</td>
+                `;
+                tbody.appendChild(tr);
             });
         }
     }
 
-    // FUNGSI UMUM LAINNYA
-    function promptDelete(id) { deleteTarget = id; document.getElementById('confirm-modal').classList.remove('hidden'); }
-    function closeConfirm() { deleteTarget = null; document.getElementById('confirm-modal').classList.add('hidden'); }
-    document.getElementById('confirm-ok').addEventListener('click', function() {
-       if (deleteTarget) {
-           allData = allData.filter(x => x.id !== deleteTarget);
-           saveData(); renderAll(); closeConfirm(); showToast("Data berhasil dihapus");
-       }
-    });
+    function renderBlok() {
+      const active = getActiveData();
+      const vBlocks = document.getElementById('blok-view');
+      const vRooms = document.getElementById('blok-room-view');
+      const vRes = document.getElementById('blok-resident-view');
+      const btnBack = document.getElementById('btn-back-blok');
+      
+      btnBack.classList.add("hidden");
+      vBlocks.classList.add('hidden');
+      vRooms.classList.add('hidden');
+      vRes.classList.add('hidden');
 
-    function openCleanup() {
-        if(confirm("Anda yakin ingin membersihkan seluruh data riwayat mutasi dan bebas?")) {
-            allData = allData.filter(d => !d.is_free && !d.is_mutasi);
-            saveData(); showToast("Riwayat berhasil dibersihkan", "success"); renderAll();
+      if(blokNavigation.view === "blocks") {
+        vBlocks.innerHTML = '';
+        vBlocks.classList.remove('hidden');
+        for(let blockName in roomsConf) {
+          const resCount = active.filter(d => d.blok === blockName).length;
+          const card = document.createElement('div');
+          card.className = "bg-white p-5 rounded-2xl shadow-sm border border-slate-200 cursor-pointer hover:border-amber-500 hover:shadow-md transition group";
+          card.onclick = () => { blokNavigation.view = "rooms"; blokNavigation.currentBlock = blockName; renderBlok(); };
+          card.innerHTML = `
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="font-bold text-lg text-slate-900 group-hover:text-amber-600 transition">${blockName}</h3>
+                <p class="text-sm text-slate-500 mt-1">${roomsConf[blockName].length} Kamar</p>
+              </div>
+              <div class="w-12 h-12 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center font-bold text-lg">${resCount}</div>
+            </div>
+          `;
+          vBlocks.appendChild(card);
         }
-    }
-
-    function setNotificationFilter(type) {
-        notificationFilter = type;
-        ["all", "new", "mutasi"].forEach(t => {
-            const btn = document.getElementById('notif-filter-' + t);
-            if(t === type) { btn.classList.add('border-amber-500', 'text-amber-600'); btn.classList.remove('border-transparent', 'text-slate-500'); } 
-            else { btn.classList.add('border-transparent', 'text-slate-500'); btn.classList.remove('border-amber-500', 'text-amber-600'); }
+      } 
+      else if(blokNavigation.view === "rooms") {
+        btnBack.classList.remove("hidden");
+        vRooms.classList.remove('hidden');
+        const bName = blokNavigation.currentBlock;
+        const rooms = roomsConf[bName];
+        const content = document.getElementById('blok-room-content');
+        content.innerHTML = `<div class="col-span-full mb-2"><h3 class="text-lg font-bold border-l-4 border-amber-500 pl-3">${bName} - Daftar Kamar</h3></div>`;
+        
+        rooms.forEach(r => {
+          const resCount = active.filter(d => d.blok === bName && d.room === r).length;
+          const card = document.createElement('div');
+          card.className = "bg-white p-4 rounded-xl shadow-sm border border-slate-200 cursor-pointer hover:border-amber-500 transition group flex justify-between items-center";
+          card.onclick = () => { blokNavigation.view = "residents"; blokNavigation.currentRoom = r; renderBlok(); };
+          card.innerHTML = `
+            <div><h4 class="font-bold text-slate-800 group-hover:text-amber-600 transition">${r}</h4></div>
+            <div class="bg-slate-100 text-slate-600 px-3 py-1 rounded-lg text-xs font-bold">${resCount} Penghuni</div>
+          `;
+          content.appendChild(card);
         });
-        renderNotifications();
-    }
-
-    function toggleForm() { document.getElementById("add-form-section").classList.toggle("hidden"); }
-    function closeNotifications() { document.getElementById('notification-panel').classList.add('hidden'); }
-    function toggleNotifications() { 
-      const panel = document.getElementById('notification-panel');
-      panel.classList.toggle('hidden');
-      if (!panel.classList.contains('hidden')) {
-        notificationsData.forEach(n => n.isRead = true);
-        saveNotifications();
-        renderNotifications();
+      }
+      else if(blokNavigation.view === "residents") {
+        btnBack.classList.remove("hidden");
+        vRes.classList.remove('hidden');
+        const bName = blokNavigation.currentBlock;
+        const rName = blokNavigation.currentRoom;
+        const res = active.filter(d => d.blok === bName && d.room === rName);
+        
+        const content = document.getElementById('blok-resident-content');
+        let html = `<div class="bg-slate-50 p-4 border-b border-slate-200 flex justify-between items-center"><h3 class="font-bold text-slate-800">${bName} - ${rName}</h3><span class="text-xs bg-slate-200 px-2 py-1 rounded font-bold">${res.length} WBP</span></div>`;
+        
+        if(res.length === 0) {
+          html += `<div class="p-8 text-center text-slate-500 text-sm">Kamar kosong.</div>`;
+        } else {
+          html += `<div class="divide-y divide-slate-100">`;
+          res.forEach((d, idx) => {
+             let btnPlace = '';
+             if(permissions[currentRole].editPlace) {
+                 btnPlace = `<button onclick="openPlacement('${d.id}')" class="text-xs px-2 py-1 bg-slate-100 rounded hover:bg-amber-500 hover:text-white transition">Pindah</button>`;
+             }
+             html += `
+             <div class="p-3 flex items-center justify-between hover:bg-slate-50 transition">
+                <div class="flex items-center gap-3">
+                  <span class="text-slate-400 font-mono text-xs">${idx+1}</span>
+                  <div>
+                    <p class="font-bold text-sm text-slate-900">${esc(d.name)}</p>
+                    <p class="text-[11px] text-slate-500 mt-0.5">${esc(d.statusType)} • ${esc(d.caseType)}</p>
+                  </div>
+                </div>
+                <div>${btnPlace}</div>
+             </div>`;
+          });
+          html += `</div>`;
+        }
+        content.innerHTML = html;
       }
     }
 
-    // ADMIN USER MANAGEMENT
-    function renderUsersTable() {
-      loadUsers(); const tbody = document.getElementById('users-tbody'); tbody.innerHTML = '';
-      usersData.forEach(u => {
-        const tr = document.createElement('tr');
-        const roleLabel = roleLabels[u.role] || u.role;
-        tr.innerHTML = `<td class="px-4 py-3 font-semibold">${esc(u.username)}</td>
-          <td class="px-4 py-3"><span class="bg-amber-100 text-amber-800 px-2 py-1 rounded-full text-xs font-bold">${esc(roleLabel)}</span></td>
-          <td class="px-4 py-3"><button onclick="editUser('${u.id}')" class="text-slate-600 hover:text-amber-600 font-semibold text-xs mr-2">Edit</button>
-            <button onclick="deleteUser('${u.id}')" class="text-red-500 hover:text-red-700 font-semibold text-xs ${u.username==='admin'?'hidden':''}">Hapus</button></td>`;
-        tbody.appendChild(tr);
-      });
+    window.backFromBlok = function() {
+      if(blokNavigation.view === "residents") { blokNavigation.view = "rooms"; blokNavigation.currentRoom = null; }
+      else if(blokNavigation.view === "rooms") { blokNavigation.view = "blocks"; blokNavigation.currentBlock = null; }
+      renderBlok();
     }
 
-    function openUserModal() {
-      document.getElementById('user-id').value = ''; document.getElementById('user-username').value = '';
-      document.getElementById('user-password').value = ''; document.getElementById('user-role').value = 'register';
-      document.getElementById('user-modal-title').innerText = 'Buat Akun Baru'; document.getElementById('user-modal').classList.remove('hidden');
-    }
-    function closeUserModal() { document.getElementById('user-modal').classList.add('hidden'); }
-    function saveUser(e) {
-      e.preventDefault();
-      const id = document.getElementById('user-id').value; const username = document.getElementById('user-username').value.trim();
-      const password = document.getElementById('user-password').value; const role = document.getElementById('user-role').value;
-      loadUsers();
-      if(id) {
-        const idx = usersData.findIndex(x => x.id === id);
-        if(idx > -1) { usersData[idx].username = username; usersData[idx].password = password; usersData[idx].role = role; }
-      } else {
-        if(usersData.find(x => x.username === username)) return showToast("Username sudah digunakan", "error");
-        usersData.push({ id: 'u_' + Date.now(), username, password, role });
-      }
-      saveUsersToStorage(); closeUserModal(); renderUsersTable(); showToast("Data akun berhasil disimpan");
-    }
-    function editUser(id) {
-      const u = usersData.find(x => x.id === id); if(!u) return;
-      document.getElementById('user-id').value = u.id; document.getElementById('user-username').value = u.username;
-      document.getElementById('user-password').value = u.password; document.getElementById('user-role').value = u.role;
-      document.getElementById('user-modal-title').innerText = 'Edit Akun'; document.getElementById('user-modal').classList.remove('hidden');
-    }
-    function deleteUser(id) {
-      if(confirm("Yakin ingin menghapus akun ini?")) {
-        usersData = usersData.filter(x => x.id !== id); saveUsersToStorage(); renderUsersTable(); showToast("Akun dihapus");
-      }
-    }
-    function updateMyCredentials(e) {
-      e.preventDefault();
-      const nu = document.getElementById('my-new-username').value.trim(); const np = document.getElementById('my-new-password').value;
-      loadUsers();
-      const meIdx = usersData.findIndex(x => x.id === activeUser.id);
-      if(meIdx > -1) {
-        usersData[meIdx].username = nu; usersData[meIdx].password = np; activeUser = usersData[meIdx];
-        saveUsersToStorage(); showToast("Kredensial Anda diperbarui.");
-      }
-    }
-    function renderSessionsTable() {
-      loadSessions(); const tbody = document.getElementById('sessions-tbody'); tbody.innerHTML = '';
-      const sorted = [...sessionsData].sort((a,b) => new Date(b.loginAt) - new Date(a.loginAt));
-      sorted.forEach(s => {
-        const d = new Date(s.loginAt); const timeStr = d.toLocaleDateString('id-ID') + ' ' + d.toLocaleTimeString('id-ID');
-        tbody.innerHTML += `<tr><td class="px-4 py-3 font-semibold">${esc(s.username)}</td>
-          <td class="px-4 py-3">${esc(roleLabels[s.role] || s.role)}</td><td class="px-4 py-3 text-xs text-slate-500">${timeStr}</td>
-          <td class="px-4 py-3"><span class="${s.status === 'Online' ? 'text-green-600 bg-green-100' : 'text-slate-500 bg-slate-200'} px-2 py-1 rounded-full text-xs font-bold">${s.status}</span></td></tr>`;
-      });
-    }
-
-    // Mendaftarkan fungsi ke global window agar atribut onclick/onsubmit di HTML berfungsi sempurna dengan ES module
+    // Expose functions required by inline HTML handlers to window object
     window.logout = logout;
+    window.toggleForm = toggleForm;
     window.toggleAdminPanel = toggleAdminPanel;
-    window.openCleanup = openCleanup;
-    window.toggleNotifications = toggleNotifications;
-    window.closeNotifications = closeNotifications;
-    window.setNotificationFilter = setNotificationFilter;
-    window.backFromBlok = backFromBlok;
     window.switchTab = switchTab;
     window.switchAdminTab = switchAdminTab;
-    window.toggleForm = toggleForm;
-    window.openUserModal = openUserModal;
-    window.closeUserModal = closeUserModal;
-    window.saveUser = saveUser;
-    window.editUser = editUser;
-    window.deleteUser = deleteUser;
-    window.closeConfirm = closeConfirm;
-    window.openPlacementModal = openPlacementModal;
-    window.closePlacementModal = closePlacementModal;
-    window.savePlacement = savePlacement;
-    window.updateRoomOptions = updateRoomOptions;
-    window.promptBebas = promptBebas;
-    window.closeBebasModal = closeBebasModal;
-    window.saveBebas = saveBebas;
-    window.promptMutasi = promptMutasi;
-    window.closeMutasiModal = closeMutasiModal;
-    window.saveMutasi = saveMutasi;
-    window.promptDelete = promptDelete;
-    window.goToBlock = goToBlock;
-    window.goToRoom = goToRoom;
+    window.setNotificationFilter = setNotificationFilter;
+    window.toggleNotifications = toggleNotifications;
+    window.closeNotifications = closeNotifications;
     window.uploadLogo = uploadLogo;
     window.resetLogoUrl = resetLogoUrl;
     window.updateFrontText = updateFrontText;
     window.resetFrontText = resetFrontText;
-    window.updateMyCredentials = updateMyCredentials;
 
-    // INISIALISASI
+    // init
     window.onload = function() {
-      loadLogo();
-      loadFrontText();
-      loadUsers();
-      loadData();
-      loadNotifications();
-      setupFirebaseListeners();
-      
-      ['search-input', 'filter-case', 'filter-status', 'filter-block'].forEach(id => {
-        const el = document.getElementById(id);
-        if(el) el.addEventListener('input', renderTable);
-      });
-      
       lucide.createIcons();
-    }
+      loadData();
+      loadUsers();
+      loadSessions();
+      loadNotifications();
+      
+      // Default initial states
+      // loadLogo() dan loadFrontText() akan dipanggil otomatis setelah data snapshot Firestore wbp_settings di-load
+      
+      document.getElementById('login-username').value = '';
+      document.getElementById('login-password').value = '';
+
+      setupFirebaseListeners();
+    };
   </script>
  </body>
 </html>
