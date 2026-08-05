@@ -416,7 +416,12 @@
 
     <!-- ADMIN: SESSIONS SECTION -->
     <section id="admin-sessions-section" class="hidden fade-in" aria-labelledby="admin-sessions-heading">
-      <h2 id="admin-sessions-heading" class="text-xl font-bold text-slate-900 border-l-4 border-amber-500 pl-3 mb-4">Pantau Sesi Login</h2>
+      <div class="flex flex-col sm:flex-row items-center justify-between mb-4 gap-4">
+        <h2 id="admin-sessions-heading" class="text-xl font-bold text-slate-900 border-l-4 border-amber-500 pl-3">Pantau Sesi Login</h2>
+        <button type="button" onclick="clearAllSessions()" class="px-4 py-2 bg-red-600 text-white font-bold rounded-xl shadow hover:bg-red-700 transition text-sm">
+          <i data-lucide="trash-2" class="inline-block w-4 h-4 mr-1"></i> Hapus Riwayat Sesi
+        </button>
+      </div>
       <div class="overflow-x-auto rounded-2xl shadow-sm border border-slate-200 bg-white">
         <table class="w-full text-sm">
           <thead class="bg-slate-100 text-slate-800">
@@ -805,17 +810,20 @@
         usersData = JSON.parse(stored);
       } else {
         usersData = [{ id: 'u1', username: 'admin', password: 'admin123', role: 'admin' }];
-        saveUsersToStorage();
+        // PERBAIKAN: Dihapus pemanggilan saveUsersToStorage() di sini agar tidak menimpa data Firebase dengan data default saat membuka sistem dari perangkat/browser baru
       }
     }
+    
     function saveUsersToStorage() {
       localStorage.setItem('wbp_users', JSON.stringify(usersData));
       saveFirebaseDoc('wbp_users', usersData);
     }
+    
     function loadSessions() {
       const stored = localStorage.getItem('wbp_sessions');
       sessionsData = stored ? JSON.parse(stored) : [];
     }
+    
     function saveSessionsToStorage() {
       localStorage.setItem('wbp_sessions', JSON.stringify(sessionsData));
       saveFirebaseDoc('wbp_sessions', sessionsData);
@@ -1386,6 +1394,21 @@
         showToast("Akun dihapus");
       }
     }
+    
+    // PERBAIKAN: Fungsi tambahan menghapus semua Sesi Login
+    window.clearAllSessions = function() {
+      if(confirm("Yakin ingin menghapus seluruh riwayat sesi login?")) {
+        // Menyisakan akun yang sedang login saat ini agar tidak error, selebihnya dihapus
+        if (activeUser) {
+          sessionsData = [{ username: activeUser.username, role: activeUser.role, loginAt: new Date().toISOString(), status: 'Online' }];
+        } else {
+          sessionsData = [];
+        }
+        saveSessionsToStorage();
+        renderSessionsTable();
+        showToast("Semua riwayat sesi berhasil dihapus");
+      }
+    };
 
     function renderSessionsTable() {
       const tbody = document.getElementById('sessions-tbody');
@@ -1763,6 +1786,7 @@
     window.closePlacementModal = closePlacementModal;
     window.closeBebasModal = closeBebasModal;
     window.closeMutasiModal = closeMutasiModal;
+    window.clearAllSessions = clearAllSessions;
 
     // init
     window.onload = function() {
